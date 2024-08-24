@@ -43,6 +43,57 @@ public class CPHInline
         }
     }
 
+    public bool ChatGptShoutouts()
+    {        
+        string targetUser = args["targetUser"].ToString();
+        string targetDescription = args["targetDescription"].ToString();
+        string targetGame = args["game"].ToString();
+        string targetTags = args["tagsDelimited"].ToString();
+        string userType = args["userType"].ToString();
+        string targetLink = $"https://twitch.tv/{targetUser}";
+        string prompt = $"Construct a witty message that doesn't exceed 400 characters, encouraging viewers to watch @{targetUser}'s stream. Ensure the response includes @{targetUser} and {targetLink}, and does NOT include hashtags";
+        string apiKey = GetGlobalVariable<string>("chatGptApiKey", true);
+        string gptModel = GetGlobalVariable<string>("chatGptModel", true);
+        string gptBehaviorGlobal = GetGlobalVariable<string>("chatGptBehavior", true);
+        string gptShoutoutAddon = $"build your response using information from the following data: {targetUser}, {targetDescription}, {targetGame}, {targetTags}";
+        string gptBehavior = gptBehaviorGlobal + gptShoutoutAddon;
+        double gptTempValue = Convert.ToDouble("1");
+            
+        ChatGptApiRequest chatGpt = new ChatGptApiRequest(apiKey, new List<string>(), this);
+        string response;
+        
+        try
+        {
+            response = chatGpt.GenerateResponse(prompt, gptModel, gptBehavior, gptTempValue);
+        }
+        catch (Exception ex)
+        {
+            LogError($"ChatGPT ERROR: {ex.Message}");
+            return false;
+        }
+
+        Root root = JsonConvert.DeserializeObject<Root>(response);
+        string finalGpt = root.choices[0].message.content;
+        finalGpt = finalGpt.Trim('\"');
+        SetGlobalVariable("ChatGPT Response", finalGpt, false);
+        if (userType == "twitch")
+        {
+            SendMessage(finalGpt, true);
+            LogInfo("Sent SO message to Twitch");
+        }
+        else if (userType == "youtube")
+        {
+            SendYouTubeMessage("Sorry, ChatGPT shoutouts are only available to Twitch users at this time.", true);
+            LogInfo("Sent message to YouTube-SO for Twitch only");
+        }
+        else if (userType == "trovo")
+        {
+            SendTrovoMessage("Sorry, ChatGPT shoutouts are only available to Twitch users at this time.", true);
+            LogInfo("Sent message to Trovo-SO for Twitch only");
+        }
+        return true;
+    }
+
     private void ProcessAndSendResponse(string response, string user)
     {
         Root root = JsonConvert.DeserializeObject<Root>(response);
@@ -53,7 +104,7 @@ public class CPHInline
         // Check and remove duplicate mentions
         finalGpt = RemoveDuplicateMentions(finalGpt, user);
 
-        // Ensure the user is tagger in the answer
+        // Ensure the user is tagged in the answer
         if (!finalGpt.Contains($"@{user}"))
         {
             finalGpt = $"@{user} " + finalGpt;
@@ -229,7 +280,7 @@ public class Message
 public class Choice
 {
     public Message message { get; set; }
-    public int index { get; set; }
+    public int index {get; set; }
     public object logprobs { get; set; }
     public string finish_reason { get; set; }
 }
