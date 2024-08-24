@@ -19,7 +19,8 @@ public class CPHInline
             string messageInput = args["rawInput"].ToString();
             string user = args["userName"].ToString();
             List<string> exclusionList = GetGlobalVariable<List<string>>("chatGptExclusions", true);
-            int messageCount = GetGlobalVariable<int>("chatGptMessageCount", true); // Retrieve the new variable
+            int messageCount = GetGlobalVariable<int>("chatGptMessageCount", true);
+
             if (exclusionList != null && exclusionList.Contains(user))
             {
                 LogInfo($"User {user} is on the exclusion list. Skipping GPT processing.");
@@ -28,8 +29,8 @@ public class CPHInline
 
             messageInput = CleanMessageInput(messageInput);
             List<string> chatHistory = GetGlobalVariable<List<string>>("chatHistory", false) ?? new List<string>();
-            // Use only the last `messageCount` messages from the chat history
             chatHistory = chatHistory.Count > messageCount ? chatHistory.GetRange(chatHistory.Count - messageCount, messageCount) : chatHistory;
+
             ChatGptApiRequest chatGpt = new ChatGptApiRequest(apiKey, chatHistory, this);
             string response = chatGpt.GenerateResponse(messageInput, gptModel, gptBehavior, gptTempValue);
             ProcessAndSendResponse(response, user);
@@ -42,31 +43,58 @@ public class CPHInline
         }
     }
 
-    public bool ChatGptShoutouts()
+    private void ProcessAndSendResponse(string response, string user)
     {
-        try
+        Root root = JsonConvert.DeserializeObject<Root>(response);
+        string myString = root.choices[0].message.content;
+        LogInfo("GPT Response: " + myString);
+        string finalGpt = CleanResponseString(myString);
+
+        // Check and remove duplicate mentions
+        finalGpt = RemoveDuplicateMentions(finalGpt, user);
+
+        // Ensure the user is tagger in the answer
+        if (!finalGpt.Contains($"@{user}"))
         {
-            string targetUser = args["targetUser"].ToString();
-            string targetDescription = args["targetDescription"].ToString();
-            string targetGame = args["game"].ToString();
-            string targetTags = args["tagsDelimited"].ToString();
-            string userType = args["userType"].ToString();
-            string prompt = $"Construct a witty message that doesn't exceed 400 characters, encouraging viewers to watch @{targetUser}'s stream. Ensure the response includes @{targetUser} and https://twitch.tv/{targetUser}, and does NOT include hashtags";
-            string gptBehavior = GetGlobalVariable<string>("chatGptBehavior", true) + $"build your response using information from the following data: {targetUser}, {targetDescription}, {targetGame}, {targetTags}";
-            double gptTempValue = Convert.ToDouble("1");
-            // Get chat history
-            List<string> chatHistory = GetGlobalVariable<List<string>>("chatHistory", false) ?? new List<string>();
-            string apiKey = GetGlobalVariable<string>("chatGptApiKey", true);
-            string gptModel = GetGlobalVariable<string>("chatGptModel", true);
-            ChatGptApiRequest chatGpt = new ChatGptApiRequest(apiKey, chatHistory, this);
-            string response = chatGpt.GenerateResponse(prompt, gptModel, gptBehavior, gptTempValue);
-            SendResponseToPlatform(response, userType);
-            return true;
+            finalGpt = $"@{user} " + finalGpt;
         }
-        catch (Exception ex)
+
+        SetGlobalVariable("ChatGPT Response", finalGpt, false);
+        string userType = args["userType"].ToString();
+        SendResponseToPlatform(finalGpt, userType);
+    }
+
+    private string CleanResponseString(string response)
+    {
+        string myStringCleaned0 = response.Replace(Environment.NewLine, " ");
+        string mystringCleaned1 = Regex.Replace(myStringCleaned0, @"\r\n?|\n", " ");
+        string myStringCleaned2 = Regex.Replace(mystringCleaned1, @"[\r\n]+", " ");
+        string unescapedString = Regex.Unescape(myStringCleaned2);
+        return unescapedString.Trim();
+    }
+
+    private string RemoveDuplicateMentions(string response, string user)
+    {
+        string pattern = $@"(@{user})(\s+\1)+";
+        return Regex.Replace(response, pattern, "$1");
+    }
+
+    private void SendResponseToPlatform(string response, string userType)
+    {
+        if (userType == "twitch")
         {
-            LogError($"Error in ChatGptShoutouts method: {ex.Message}");
-            return false;
+            SendMessage(response, true);
+            LogInfo("Sent message to Twitch");
+        }
+        else if (userType == "youtube")
+        {
+            SendYouTubeMessage(response, true);
+            LogInfo("Sent message to YouTube");
+        }
+        else if (userType == "trovo")
+        {
+            SendTrovoMessage(response, true);
+            LogInfo("Sent message to Trovo");
         }
     }
 
@@ -114,45 +142,6 @@ public class CPHInline
         }
 
         return messageInput;
-    }
-
-    private void ProcessAndSendResponse(string response, string user)
-    {
-        Root root = JsonConvert.DeserializeObject<Root>(response);
-        string myString = root.choices[0].message.content;
-        LogInfo("GPT Response: " + myString);
-        string finalGpt = CleanResponseString(myString);
-        SetGlobalVariable("ChatGPT Response", finalGpt, false);
-        string userType = args["userType"].ToString();
-        SendResponseToPlatform($"@{user} {finalGpt}", userType);
-    }
-
-    private string CleanResponseString(string response)
-    {
-        string myStringCleaned0 = response.Replace(Environment.NewLine, " ");
-        string mystringCleaned1 = Regex.Replace(myStringCleaned0, @"\r\n?|\n", " ");
-        string myStringCleaned2 = Regex.Replace(mystringCleaned1, @"[\r\n]+", " ");
-        string unescapedString = Regex.Unescape(myStringCleaned2);
-        return unescapedString.Trim();
-    }
-
-    private void SendResponseToPlatform(string response, string userType)
-    {
-        if (userType == "twitch")
-        {
-            SendMessage(response, true);
-            LogInfo("Sent message to Twitch");
-        }
-        else if (userType == "youtube")
-        {
-            SendYouTubeMessage(response, true);
-            LogInfo("Sent message to YouTube");
-        }
-        else if (userType == "trovo")
-        {
-            SendTrovoMessage(response, true);
-            LogInfo("Sent message to Trovo");
-        }
     }
 }
 
